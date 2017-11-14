@@ -30,7 +30,7 @@ public class IntelligentMSAgent extends MSAgent {
     int count = 1;
     for(int i = 0; i < field.getNumOfCols(); i++) {
       for(int j = 0; j < field.getNumOfRows(); j++) {
-        locVarMap.put(new Tuple<Integer, Integer>(j, i), count);        
+        locVarMap.put(new Tuple<Integer, Integer>(i, j), count);
         count++;
       }
     }
