@@ -13,11 +13,14 @@ public class Test {
   }
 
   public static void main(String[] args) {
-    MSField f = new MSField("fields/anfaenger1-9x9-10.txt");
+    MSField f = new MSField("fields/profi1-30x16-99.txt");
+    long startTime = System.currentTimeMillis();
     IntelligentMSAgent agent = new IntelligentMSAgent();
     agent.setField(f);
     agent.activateDisplay();
     agent.solve();
+    long endTime = System.currentTimeMillis();
+    System.out.println("Runtime in ms: " + (startTime - endTime));
   }
 
 }
