@@ -41,7 +41,7 @@ public class UsageExample {
 
 			i++;
 			MSField f = new MSField("fields/baby3-5x5-1.txt");
-			RandomMSAgent agent = new RandomMSAgent();
+			IntelligentMSAgent agent = new IntelligentMSAgent();
 			agent.setField(f);
 			// to see what happens in the first iteration
 			if (i == 1) agent.activateDisplay();
