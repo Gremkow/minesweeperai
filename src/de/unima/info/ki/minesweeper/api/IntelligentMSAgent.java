@@ -1,44 +1,48 @@
 package de.unima.info.ki.minesweeper.api;
 
-import java.lang.reflect.Array;
 import java.util.ArrayList;
 import java.util.HashMap;
-import java.util.List;
-import java.util.stream.Collectors;
+import java.util.Random;
 
 public class IntelligentMSAgent extends MSAgent {
 
   private boolean displayActivated = false;
   private boolean firstDecision = true;
-  private ArrayList<ArrayList<Integer>> KB;
-  private boolean[][] uncovered;
-  private boolean[][] mines;
+  //private boolean[][] uncovered;
+  private ArrayList<Tuple<Integer, Integer>> coveredFields, mineFields;
+  //private boolean[][] mines;
   private HashMap<Tuple<Integer, Integer>, Integer> locVarMap;
   private SatSolver sSolver;
 
   public IntelligentMSAgent() {
-    KB = new ArrayList<>();
-    sSolver = new SatSolver();
-    locVarMap = new HashMap<>();
+    
   }
 
   @Override
   public void setField(MSField field) {
-    super.setField(field);
-    uncovered = new boolean[field.getNumOfCols()][field.getNumOfRows()];
-    mines = new boolean[field.getNumOfCols()][field.getNumOfRows()];
-    int count = 1;
+	super.setField(field);
+	locVarMap = new HashMap<>();  
+	coveredFields = new ArrayList<>();
+	mineFields = new ArrayList<>();
+    
+    int varNumber = 1;
     for(int i = 0; i < field.getNumOfCols(); i++) {
       for(int j = 0; j < field.getNumOfRows(); j++) {
-        locVarMap.put(new Tuple<Integer, Integer>(i, j), count);
-        count++;
+    	  	Tuple<Integer, Integer> tpl = new Tuple<Integer, Integer>(i, j);
+        locVarMap.put(tpl, varNumber);
+        coveredFields.add(tpl);
+        varNumber++;
       }
     }
   }
 
   @Override
   public boolean solve() {
-    int x, y, feedback;
+	//init solver
+	sSolver = new SatSolver();  
+	  
+    int feedback;
+    Tuple<Integer, Integer> pos;
 
     do {
       if (displayActivated) {
@@ -46,22 +50,24 @@ public class IntelligentMSAgent extends MSAgent {
       }
 
       if (firstDecision) {
-        x = 0;
-        y = 0;
+        pos = new Tuple<Integer, Integer>(0, 0);
         firstDecision = false;
       } else {
-        Tuple<Integer, Integer> pos = getNextPosition();
-        x = pos.getKey();
-        y = pos.getValue();
+        pos = getNextPosition();
       }
-
+      
+      /*
       if (displayActivated) {
         System.out.println("Uncovering (" + x + "," + y + ")");
       }
-      feedback = field.uncover(x, y);
-      uncovered[x][y] = true;
+      */
+      
+      //Uncover the field
+      feedback = field.uncover(pos.getKey(), pos.getValue());
+      coveredFields.remove(pos);
+      
       if (feedback >= 0) {
-        update(x, y, feedback, true);
+        update(pos, feedback, true);
       }
 
     } while (feedback >= 0 && !field.solved());
@@ -79,38 +85,29 @@ public class IntelligentMSAgent extends MSAgent {
     }
   }
 
-  private void update(int x, int y, int feedback, boolean first) {
-    ArrayList<Integer> clause;
-    ArrayList<Tuple<Integer, Integer>> neighbours = getCoveredNeighbours(x, y), mines = getMinesNeighbours(x, y);
-    int n = neighbours.size();
-    int k = feedback - mines.size();
-    
+  private void update(Tuple<Integer, Integer> pos, int feedback, boolean first) {
     //Current field
-    clause = new ArrayList<>();
-    clause.add(-1 * locVarMap.get(new Tuple<Integer, Integer>(x, y)));
-    KB.add(clause);
+    //int l = t;
+    sSolver.addClause(new int[]{-locVarMap.get(pos)});
     
     //Set surroundings to false if feedback = 0
     if(feedback == 0) {
-      for (Tuple<Integer, Integer> pos : neighbours) {
-        clause = new ArrayList<>();
-        clause.add(-1 * locVarMap.get(pos));
-        KB.add(clause);
+      for (Tuple<Integer, Integer> nP : getCoveredNeighbours(pos)) {
+        sSolver.addClause(new int[]{-locVarMap.get(nP)});
       }
       return;
     }
     
-    bounds(x, y, k, n);
-    
-    if(first) {
-      for (Tuple<Integer, Integer> p : getUncoveredNeighbours(x, y)) {
-        update(p.getKey(), p.getValue(), field.uncover(p.getKey(), p.getValue()), false);
-      }
-    }
+    //Get the clauses from the bounds
+    bounds(pos, feedback);
   }
   
-  private void bounds(int x, int y, int k, int n) {
-    int[] s, vars = getCoveredNeighbours(x, y).stream().map(ele -> locVarMap.get(ele)).mapToInt(Integer::intValue).toArray();
+  private void bounds(Tuple<Integer, Integer> pos, int feedback) {
+	ArrayList<Tuple<Integer, Integer>> neighbours = getCoveredNeighbours(pos);
+	int n = neighbours.size();
+	int k = feedback - getNeighboursMineCount(pos);
+    
+	int[] s, vars = getCoveredNeighbours(pos).stream().map(ele -> locVarMap.get(ele)).mapToInt(Integer::intValue).toArray();
     int l;
     
     //upper
@@ -119,7 +116,7 @@ public class IntelligentMSAgent extends MSAgent {
     if (l <= vars.length) {
       // first index sequence: 0, 1, 2, ...
       for (int i = 0; (s[i] = i) < l - 1; i++);  
-      KB.add(getSubset(vars, s, -1));
+      sSolver.addClause(getSubset(vars, s, -1));
       while(true) {
           int i;
           // find position of item that can be incremented
@@ -131,7 +128,7 @@ public class IntelligentMSAgent extends MSAgent {
           for (++i; i < l; i++) {    // fill up remaining items
               s[i] = s[i - 1] + 1; 
           }
-          KB.add(getSubset(vars, s, -1));
+          sSolver.addClause(getSubset(vars, s, -1));
       }
     }
     
@@ -141,7 +138,7 @@ public class IntelligentMSAgent extends MSAgent {
     if (l <= vars.length) {
       // first index sequence: 0, 1, 2, ...
       for (int i = 0; (s[i] = i) < l - 1; i++);  
-      KB.add(getSubset(vars, s, 1));
+      sSolver.addClause(getSubset(vars, s, 1));
       while(true) {
           int i;
           // find position of item that can be incremented
@@ -153,189 +150,72 @@ public class IntelligentMSAgent extends MSAgent {
           for (++i; i < l; i++) {    // fill up remaining items
               s[i] = s[i - 1] + 1; 
           }
-          KB.add(getSubset(vars, s, 1));
+          sSolver.addClause(getSubset(vars, s, 1));
       }
-    }
-  }
-  
-  /**
-   * 
-   * @param k number of mines
-   * @param n number of fields to check
-   */
-  private void upperBound(int x, int y, int k, int n) {
-    ArrayList<Integer> clause;
-    int[] vars;
-    k+=1;
-    vars = getCoveredNeighbours(x, y).stream().map(ele -> locVarMap.get(ele)).mapToInt(Integer::intValue).toArray();
-
-    int[] s = new int[k]; // here we'll keep indices pointing to elements in input array
-
-    if (k <= vars.length) {
-        // first index sequence: 0, 1, 2, ...
-        for (int i = 0; (s[i] = i) < k - 1; i++);  
-        KB.add(getSubset(vars, s, -1));
-        while(true) {
-            int i;
-            // find position of item that can be incremented
-            for (i = k - 1; i >= 0 && s[i] == vars.length - k + i; i--); 
-            if (i < 0) {
-                break;
-            }
-            s[i]++;                    // increment this item
-            for (++i; i < k; i++) {    // fill up remaining items
-                s[i] = s[i - 1] + 1; 
-            }
-            KB.add(getSubset(vars, s, -1));
-        }
     }
   }
   
   //generate actual subset by index sequence
-  ArrayList<Integer> getSubset(int[] input, int[] subset, int fak) {
-      ArrayList<Integer> result = new ArrayList<>(); 
+  int[] getSubset(int[] input, int[] subset, int fak) {
+	  int[] result = new int[subset.length];
       for (int i = 0; i < subset.length; i++) 
-          result.add(fak * input[subset[i]]);
+    	  result[i] = (fak * input[subset[i]]);
       return result;
   }
   
-  /**
-   * 
-   * @param k number of mines
-   * @param n number of fields to check
-   */
-  private void lowerBound(int x, int y, int k, int n) {
-    ArrayList<Integer> clause;
-    int[] vars;
-    k = n - k + 1;
-    vars = getCoveredNeighbours(x, y).stream().map(ele -> locVarMap.get(ele)).mapToInt(Integer::intValue).toArray();
-
-    int[] s = new int[k]; // here we'll keep indices pointing to elements in input array
-
-    if (k <= vars.length) {
-        // first index sequence: 0, 1, 2, ...
-        for (int i = 0; (s[i] = i) < k - 1; i++);  
-        KB.add(getSubset(vars, s, 1));
-        while(true) {
-            int i;
-            // find position of item that can be incremented
-            for (i = k - 1; i >= 0 && s[i] == vars.length - k + i; i--); 
-            if (i < 0) {
-                break;
-            }
-            s[i]++;                    // increment this item
-            for (++i; i < k; i++) {    // fill up remaining items
-                s[i] = s[i - 1] + 1; 
-            }
-            KB.add(getSubset(vars, s, 1));
-        }
-    }
-  }
-  
   private Tuple<Integer, Integer> getNextPosition() {
-    for (Tuple<Integer, Integer> pos : getCoveredFields()) {
-      if (sSolver.isNoMine(KB, locVarMap.get(pos))) {
+	ArrayList<Tuple<Integer, Integer>> cF = new ArrayList<>(coveredFields);
+    for (Tuple<Integer, Integer> pos : cF) {
+      if (sSolver.isNoMine(locVarMap.get(pos))) {
         return pos;
       }
-      if (sSolver.isMine(KB, locVarMap.get(pos))) {
+      if (sSolver.isMine(locVarMap.get(pos))) {
         // If we've found a mine, ignore this field in further calculation
-        uncovered[pos.getKey()][pos.getValue()] = true;
-        mines[pos.getKey()][pos.getValue()] = true;
-        ArrayList<Integer> clause = new ArrayList<>();
-        clause.add(locVarMap.get(pos));
-        KB.add(clause);
+        coveredFields.remove(pos);
+        mineFields.add(pos);
+        sSolver.addClause(new int[]{locVarMap.get(pos)});
       }
     }
-    return getCoveredFields().get(0);
+    //get random field next if nothing is concludeable
+    Random r = new Random();
+    int index = r.nextInt(coveredFields.size());
+    return coveredFields.get(index);
   }
-
-  /**
-   * Return all indices of possible positions
-   */
-  private ArrayList<Tuple<Integer, Integer>> getCoveredFields() {
-    ArrayList<Tuple<Integer, Integer>> positions = new ArrayList<>();
-    for (int i = 0; i < uncovered.length; i++) {
-      for (int j = 0; j < uncovered[i].length; j++) {
-        if (!uncovered[i][j]) {
-          positions.add(new Tuple<Integer, Integer>(i, j));
-        }
-      }
-    }
-    return positions;
-  }
-
+  
   /**
    * Return all indices of covered neighbours
    */
-  private ArrayList<Tuple<Integer, Integer>> getCoveredNeighbours(int x, int y) {
+  private ArrayList<Tuple<Integer, Integer>> getCoveredNeighbours(Tuple<Integer, Integer> pos) {
     ArrayList<Tuple<Integer, Integer>> positions = new ArrayList<>();
-    for (int i = x - 1; i <= x + 1; i++) {
-      if (i < 0 || i >= field.getNumOfCols()) {
-        continue;
-      }
-      for (int j = y - 1; j <= y + 1; j++) {
-        if (j < 0 || j >= field.getNumOfRows()) {
-          continue;
-        }
-
-        if (!uncovered[i][j]) {
-          positions.add(new Tuple<Integer, Integer>(i, j));
+    for (int i = pos.getKey() - 1; i <= pos.getKey() + 1; i++) {
+      for (int j = pos.getValue() - 1; j <= pos.getValue() + 1; j++) {
+        Tuple<Integer, Integer> nP = new Tuple<Integer, Integer>(i, j);
+        if(coveredFields.contains(nP)) {
+        	positions.add(nP);        	
         }
       }
     }
-    return positions;
-  }
-  
-  private ArrayList<Tuple<Integer, Integer>> getUncoveredNeighbours(int x, int y) {
-    ArrayList<Tuple<Integer, Integer>> positions = new ArrayList<>();
-    for (int i = x - 1; i <= x + 1; i++) {
-      if (i < 0 || i >= field.getNumOfCols()) {
-        continue;
-      }
-      for (int j = y - 1; j <= y + 1; j++) {
-        if (j < 0 || j >= field.getNumOfRows()) {
-          continue;
-        }
-
-        if (uncovered[i][j] && !mines[i][j]) {
-          positions.add(new Tuple<Integer, Integer>(i, j));
-        }
-      }
-    }
+    positions.remove(pos);
     return positions;
   }
   
   /**
    * Return all indices of neighbor mines
    */
-  private ArrayList<Tuple<Integer, Integer>> getMinesNeighbours(int x, int y) {
-    ArrayList<Tuple<Integer, Integer>> positions = new ArrayList<>();
-    for (int i = x - 1; i <= x + 1; i++) {
-      if (i < 0 || i >= field.getNumOfCols()) {
-        continue;
-      }
-      for (int j = y - 1; j <= y + 1; j++) {
-        if (j < 0 || j >= field.getNumOfRows()) {
-          continue;
-        }
-
-        if (mines[i][j]) {
-          positions.add(new Tuple<Integer, Integer>(i, j));
-        }
-      }
-    }
-    return positions;
+  private int getNeighboursMineCount(Tuple<Integer, Integer> pos) {
+	ArrayList<Tuple<Integer, Integer>> positions = new ArrayList<>();
+	for (int i = pos.getKey() - 1; i <= pos.getKey() + 1; i++) {
+		for (int j = pos.getValue() - 1; j <= pos.getValue() + 1; j++) {
+		  Tuple<Integer, Integer> nP = new Tuple<Integer, Integer>(i, j);
+		  if(mineFields.contains(nP)) {
+		  	positions.add(nP);        	
+		  }
+		}
+	}
+	positions.remove(pos);
+	return positions.size();
   }
   
-  private int binom(int n, int k) {
-    return faculty(n)/(faculty(n-k) * faculty(k));
-  }
-  
-  private int faculty(int n) {
-    if(n <= 1) return 1;
-    return n*faculty(n-1);
-  }
-
   @Override
   public void activateDisplay() {
     this.displayActivated = true;
